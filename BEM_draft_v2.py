@@ -49,7 +49,7 @@ class Radiator():
             if self.area is not None:
                 area = self.area
             else:
-                raise ValueError('Please input a v_tan')
+                raise ValueError('Please input a valid area')
 
         if coordinates is None:
             if self.coordinates is not None:
@@ -66,32 +66,35 @@ class Radiator():
 
         return p
 
-    # def radiate_frequency_dipole(self, v_tan: float,
-    #                              observation_point: np.ndarray,
-    #                              frequency: int|float,
-    #                              p_acoustic: int|float = 0,
-    #                              coordinates: np.ndarray = None,
-    #                              area: float|int = None,
-    #                              ro: int|float = 1.225):
-    #     if area is None:
-    #         if self.area is not None:
-    #             area = self.area
-    #         else:
-    #             raise ValueError('Please input a v_tan')
-    #
-    #     if coordinates is None:
-    #         if self.coordinates is not None:
-    #             coordinates = self.coordinates
-    #         else:
-    #             raise ValueError('Please input the coordinates')
-    #     coordinates = np.array(coordinates)
-    #     observation_point = np.array(observation_point)
-    #     k = self.calculate_k(frequency)
-    #     r = np.linalg.norm((coordinates - observation_point))
-    #     d_green = ((1j* k * r) * np.exp(-1j* r * k))/ 4 * np.pi *r
-    #     cos_theta = np.dot(coordinates, observation_point) / (np.linalg.norm(coordinates) * np.linalg.norm(observation_point))
-    #     p = (p_acoustic * d_green * area * cos_theta)
-    #     return p
+
+    def radiate_frequency_dipole(self, v_tan: float,
+                                 observation_point: np.ndarray,
+                                 frequency: int|float,
+                                 coordinates: np.ndarray = None,
+                                 area: float | int = None,
+                                 rho: int|float = 1.225,
+                                 c:float|int = 343):
+        if area is None:
+            if self.area is not None:
+                area = self.area
+            else:
+                raise ValueError('Please input a v_tan')
+
+        if coordinates is None:
+            if self.coordinates is not None:
+                coordinates = self.coordinates
+            else:
+                raise ValueError('Please input the coordinates')
+        coordinates = np.array(coordinates)
+        observation_point = np.array(observation_point)
+        k = self.calculate_k(frequency)
+        r_vec = observation_point - coordinates  # vector from source to observer
+        r = np.linalg.norm(r_vec)
+        dipole_axis = np.array([1.0, 0.0, 0.0])  # or use a surface normal
+        cos_theta = np.dot(dipole_axis, r_vec) / (np.linalg.norm(dipole_axis) * r)
+        p = rho * c * v_tan * (((1j * k * r + 1) * np.exp(-1j * k * r)) / (4 * np.pi * (r ** 2))) * cos_theta * area
+        return p
+
 
 
 

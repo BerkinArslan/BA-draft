@@ -65,147 +65,100 @@ deflection_results = DeflectionEBBVertic(
 )
 
 # 4. POSTPROCESSING & VISUALIZATION -------------------------------------------
-# 4.1 Calculate frequency response at excitation point
-# response = resp(results=deflection_results)
-#
-# freq_mobility = response.mob
-# frequencies = response.freq
-# freq_v_raw = freq_mobility * 1j * frequencies
-#
-# spls = []
-# for i, frequency in enumerate(frequencies):
-#     monopole = BEM.Radiator([0, 0, 0], freq_v_raw[i], 0.0001)
-#     k = monopole.calculate_k(frequency)
-#     spl = abs(monopole.radiate_frequency_monopole(freq_v_raw[i], [3, 4, 0],
-#                                               frequency))
-#     spls.append(spl)
-#
-# plt.plot(frequencies, spls)
-# plt.show()
-# 1) get your response object and time‐step info
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-response    = resp(results=deflection_results)
-dt          = deflection_results.discr.dt        # scalar
-nt          = deflection_results.discr.nt        # integer
-# response.freq is already masked to [f_min, f_max]
-frequencies = response.freq                      # shape: (n_freq,) == (1160,)
-n_freq      = frequencies.shape[0]               # 1160
-
-# 2) grab the raw deflections: (2*nx, nt+1)
-D = response.results.deflection     # shape: (2*nx, nt+1)
-nx          = D.shape[0] // 2                    # number of spatial nodes
-
-# 3) extract *rail* deflections only: (nx, nt)
-#    drop the last column since FFT uses nt samples
-rail_defl   = D[0::2, :nt]                       # shape: (nx, nt)
-
-# 4) compute the full FFT (all frequencies) of each node’s time signal
-#    U_all[i, k_full] = disp amp at node i, full-frequency-index k_full
-U_all = np.fft.rfft(rail_defl, axis=1)     # shape: (nx, nt//2+1)
-U_all *= 2.0 / nt                           # same normalization as fast_fourier_tr
-# I dont understand this but appearently this is done because
-#we want to get the amplidtues but numpy does not divide with N
-
-# 5) build the full frequency axis and then mask it to [f_min, f_max]
-full_freqs = np.fft.rfftfreq(nt, dt)             # shape: (nt//2+1,)
-mask       = (full_freqs > response.f_min) & (full_freqs <= response.f_max)
-# now mask down both freq axis and FFT array
-freqs = full_freqs[mask]                    # shape: (n_freq,) == response.freq
-U_masked = U_all[:, mask]                      # shape: (nx, n_freq)
-
-# sanity check
-assert np.allclose(freqs, response.freq)
-
-# 6) convert displacement → velocity: v_fft[i,k] = j·2πf_k · U_masked[i,k]
-omega       = 2 * np.pi * freqs                  # shape: (n_freq,)
-# broadcast (1×n_freq) × (nx×n_freq) → (nx×n_freq)
-rail_velFFT = (1j * omega)[None, :] * U_masked    # shape: (nx, n_freq)
-
-# 7) compute SPL by superposing each node’s contribution
-spl = np.zeros(n_freq)                    # shape: (n_freq,)
-p_ref = 20e-6                               # reference pressure [Pa]
-
-for k, f in enumerate(freqs):
-    p_total = 0+0j
-    for i in range(nx):
-        v = rail_velFFT[i, k]                    # scalar complex velocity
-        monopole = BEM.Radiator([0,0,0], v, 1e-4)
-        monopole.calculate_k(f)
-        p = monopole.radiate_frequency_monopole(v, [3,4,0], f)
-        p_total += p
-    spl[k] = 20 * np.log10(abs(p_total) / p_ref)
-
-# 8) plot
-plt.figure(figsize=(8,5))
-plt.semilogx(freqs, spl)
-plt.xlabel("Frequency [Hz]")
-plt.ylabel("SPL [dB re 20 µPa]")
-plt.title("Radiated SPL Spectrum")
-plt.grid(True, which="both", ls="--", lw=0.5)
-plt.show()
 
 response = resp(results=deflection_results) #now response is a DeflectionEBBVert object.
+
+#get the small variables that we will need to when computing
 dt = response.results.discr.dt
 nt = response.results.discr.nt
 frequencies = response.freq
 n_freq = frequencies.shape[0]
+
+#Get deflection result
 D = response.results.deflection     # shape: (2*nx, nt+1)
+
+
 # the shape has all deflections from rail and the pad
 nx = D.shape[0] // 2
 rail_defl = D[0::2, :nt] #not taking the last because they are the dts
+
+#computing the deflection in frequency domain
+#for that there is a numpy function
 U_all = np.fft.rfft(rail_defl, axis=1)     # shape: (nx, nt//2+1)
 U_all *= 2.0 / nt                           # same normalization as fast_fourier_tr
 # I dont understand this but appearently this is done because
 #we want to get the amplidtues but numpy does not divide with N
+
+
 # 5) build the full frequency axis and then mask it to [f_min, f_max]
 full_freqs = np.fft.rfftfreq(nt, dt)             # shape: (nt//2+1,)
 mask = (full_freqs > response.f_min) & (full_freqs <= response.f_max)
 freqs = full_freqs[mask]                    # shape: (n_freq,) == response.freq
+#I dont know how they have the same shape but they do
+
 U_masked = U_all[:, mask]                      # shape: (nx, n_freq)
+
+
 # 6) convert displacement → velocity: v_fft[i,k] = j·2πf_k · U_masked[i,k]
 omega = 2 * np.pi * freqs                  # shape: (n_freq,)
 # broadcast (1×n_freq) × (nx×n_freq) → (nx×n_freq)
 rail_velFFT = (1j * omega)[None, :] * U_masked    # shape: (nx, n_freq)
+
+
 # 7) compute SPL by superposing each node’s contribution
-spl = np.zeros(n_freq)                    # shape: (n_freq,)
+spl = np.zeros(n_freq)
+spl_mono = np.zeros(n_freq)                    # shape: (n_freq,)
+spl_di = np.zeros(n_freq)                    # shape: (n_freq,)
+
 p_ref = 20e-6                               # reference pressure [Pa]
 
 for k, f in enumerate(freqs):
     p_total = 0+0j
+    p_total_mono = 0 + 0j
+    p_total_di = 0 + 0j
     for i in range(nx):
-        v = rail_velFFT[i, k]                    # scalar complex velocity
+        v = rail_velFFT[i, k]# scalar complex velocity
         monopole = BEM.Radiator([0,0,0], v, 1e-4)
         monopole.calculate_k(f)
-        p = monopole.radiate_frequency_monopole(v, [3,4,0], f)
+        p = monopole.radiate_frequency_monopole(v, [3,4,0], f) + monopole.radiate_frequency_dipole(v, [3,4,0], f)
+        p_mono = monopole.radiate_frequency_monopole(v, [3,4,0], f)
+        p_di = monopole.radiate_frequency_dipole(v, [3,4,0], f)
+
         p_total += p
+        p_total_mono += p_mono
+        p_total_di += p_di
+
+        """
+        INSTEAD OF DOING A FOR LOOP CAN I DO A MATRIX EQUATION TO 
+        HAVE FASTER CALCULATION?
+        """
+
     spl[k] = 20 * np.log10(abs(p_total) / p_ref)
+    spl_mono[k] = 20 * np.log10(abs(p_total_mono) / p_ref)
+    spl_di[k] = 20 * np.log10(abs(p_total_di) / p_ref)
+
 
 # 8) plot
 plt.figure(figsize=(8,5))
 plt.semilogx(freqs, spl)
 plt.xlabel("Frequency [Hz]")
 plt.ylabel("SPL [dB re 20 µPa]")
-plt.title("Radiated SPL Spectrum")
+plt.title("Radiated SPL Spectrum Total")
+plt.grid(True, which="both", ls="--", lw=0.5)
+plt.show()
+plt.figure(figsize=(8,5))
+plt.semilogx(freqs, spl_mono)
+plt.xlabel("Frequency [Hz]")
+plt.ylabel("SPL [dB re 20 µPa]")
+plt.title("Radiated SPL Spectrum only monopole")
+plt.grid(True, which="both", ls="--", lw=0.5)
+plt.show()
+plt.figure(figsize=(8,5))
+plt.semilogx(freqs, spl_di)
+plt.xlabel("Frequency [Hz]")
+plt.ylabel("SPL [dB re 20 µPa]")
+plt.title("Radiated SPL Spectrum only dipole")
 plt.grid(True, which="both", ls="--", lw=0.5)
 plt.show()
 
